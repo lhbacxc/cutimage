@@ -168,6 +168,7 @@ class ProjectData:
     output_dir: Path | None = None
     final_image_name: str = ""
     final_image_name_sync_with_project: bool = True
+    export_cropped_images: bool = True
     settings: ProcessingSettings = field(default_factory=ProcessingSettings)
     images: list[ImageState] = field(default_factory=list)
 

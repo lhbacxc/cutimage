@@ -13,7 +13,7 @@
 2. 启动脚本：
    `run_cutimage.bat`
 3. 项目文档与设计说明：
-   `docs/`、`项目总览与AI交接文档.md`
+   `docs/`
 4. 仍有参考价值的实验源码与说明文件：
    例如 `_top_extension_experiment/` 中的 `.py`、`.md`、`.bat`、`.json`
 

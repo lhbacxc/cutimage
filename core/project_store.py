@@ -21,6 +21,7 @@ def save_project(project: ProjectData, project_file: Path) -> None:
         "output_dir": _relative_path(project.output_dir, base_dir) if project.output_dir else None,
         "final_image_name": project.final_image_name,
         "final_image_name_sync_with_project": project.final_image_name_sync_with_project,
+        "export_cropped_images": project.export_cropped_images,
         "settings": project.settings.to_dict(),
         "images": [image.to_dict() for image in project.images],
     }
@@ -42,6 +43,7 @@ def load_project(project_file: Path) -> ProjectData:
         output_dir=output_dir,
         final_image_name=str(data.get("final_image_name", "")),
         final_image_name_sync_with_project=bool(data.get("final_image_name_sync_with_project", True)),
+        export_cropped_images=bool(data.get("export_cropped_images", True)),
         settings=settings,
         images=images,
     )

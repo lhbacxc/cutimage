@@ -221,7 +221,7 @@
 1. `./core/models.py`
 2. `./core/project_store.py`
 3. `./ui/main_window.py`
-4. `./项目总览与AI交接文档.md`
+4. `./docs/project/`
 
 ## 10. 验证点
 

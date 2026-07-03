@@ -2,7 +2,7 @@
 
 ## 1. 背景
 
-当前项目使用 `./项目总览与AI交接文档.md` 作为总览、交接、行为规则和功能现状的统一入口。
+当前项目最初使用单一总览文档作为总览、交接、行为规则和功能现状的统一入口。
 
 这种方式在项目早期是高效的，但随着功能增加，单文件逐渐变长，开始出现以下问题：
 
@@ -37,13 +37,13 @@
 采用三层结构：
 
 1. 用户层：`./README.md`
-2. AI / 接手层：`./docs/project/ai-quickstart.md`、`./docs/project/index.md`
+2. AI / 接手层：`./AIREADME.md`、`./docs/project/index.md`
 3. 专题层：`./docs/project/*.md` 与 `./docs/project/features/*.md`
 
 设计原则如下：
 
 1. `./README.md` 只服务普通使用者。
-2. `./docs/project/ai-quickstart.md` 只负责让 AI 快速进入状态，必须保持短。
+2. `./AIREADME.md` 只负责让 AI 快速进入状态，必须保持短。
 3. `./docs/project/index.md` 只做导航，不承载规则正文。
 4. 每类详细规则只能在一个主文件中展开，其他文件只做摘要和跳转。
 5. 当前现状与历史演进分离，避免 AI 把旧行为误判为当前行为。
@@ -55,7 +55,7 @@
 ```text
 ./README.md
 ./docs/project/index.md
-./docs/project/ai-quickstart.md
+./AIREADME.md
 ./docs/project/overview.md
 ./docs/project/runtime-and-launch.md
 ./docs/project/architecture.md
@@ -75,7 +75,7 @@
 
 ### 6.1 入口文件
 
-`./docs/project/ai-quickstart.md`：
+`./AIREADME.md`：
 
 1. 给新开窗口的 AI 首读。
 2. 只保留项目一句话说明、启动入口、核心代码位置、当前关键规则、跳转路径。
@@ -136,7 +136,7 @@
 
 ## 7. 现有总览文档迁移映射
 
-现有 `./项目总览与AI交接文档.md` 建议按以下方式拆分：
+原有单文件总览建议按以下方式拆分：
 
 1. “项目目标” -> `./docs/project/overview.md`
 2. “当前运行方式” -> `./docs/project/runtime-and-launch.md`
@@ -148,15 +148,15 @@
 8. “阶段性演进” -> `./docs/project/history.md` 或保留为附录
 9. “已明确验证过的能力” -> 并入对应专题文档末尾
 10. “当前已知限制与后续可优化点” -> `./docs/project/known-issues.md`
-11. “交接给新的 AI 的重点” -> `./docs/project/ai-quickstart.md`
-12. “最简交接结论” -> `./docs/project/ai-quickstart.md` 开头摘要
+11. “交接给新的 AI 的重点” -> `./AIREADME.md`
+12. “最简交接结论” -> `./AIREADME.md` 开头摘要
 
 ## 8. 推荐阅读顺序
 
 后续新开窗口时，推荐让 AI 按以下顺序阅读：
 
 1. `./README.md`
-2. `./docs/project/ai-quickstart.md`
+2. `./AIREADME.md`
 3. `./docs/project/index.md`
 4. 再根据问题类型阅读对应专题文档
 
@@ -171,7 +171,7 @@
 先创建以下高价值文件：
 
 1. `./docs/project/index.md`
-2. `./docs/project/ai-quickstart.md`
+2. `./AIREADME.md`
 3. `./docs/project/runtime-and-launch.md`
 4. `./docs/project/project-file.md`
 5. `./docs/project/features/export.md`
@@ -191,7 +191,7 @@
 
 ### 9.3 第三阶段
 
-将 `./项目总览与AI交接文档.md` 降级为迁移入口页：
+移除旧的单文件总览入口，改由 `./docs/project/` 接管：
 
 1. 说明文档已拆分。
 2. 给出新的阅读顺序。
@@ -203,7 +203,7 @@
 为了避免拆完后重新膨胀为新的大杂烩，建议固定以下规则：
 
 1. 每条详细规则只能有一个主文件。
-2. `./docs/project/ai-quickstart.md` 只写结论，不展开细节。
+2. `./AIREADME.md` 只写结论，不展开细节。
 3. `./docs/project/index.md` 只导航，不承载正文。
 4. 当前现状与历史演进必须分开维护。
 5. 新功能上线后，优先更新对应专题文档，而不是只补到总览里。
@@ -227,7 +227,7 @@
 
 如果后续实际落地，至少应达到以下结果：
 
-1. 新开窗口时，AI 不再默认先读整篇 `./项目总览与AI交接文档.md`。
+1. 新开窗口时，AI 不再默认先读旧的单文件总览。
 2. 常见问题可以直接根据 `./docs/project/index.md` 跳转到专题文档。
 3. 导出、修框、项目恢复等高频规则有明确的单一主文档。
 4. 旧总览文档不再承担全部职责，而是退居迁移入口或历史汇总。

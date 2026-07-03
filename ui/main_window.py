@@ -84,14 +84,17 @@ class CutImageApp:
         self.project_name_entry: ttk.Entry | None = None
         self.final_image_name_entry: ttk.Entry | None = None
         self.final_image_name_sync_checkbutton: ttk.Checkbutton | None = None
+        self.export_cropped_images_checkbutton: ttk.Checkbutton | None = None
         self._is_processing = False
         self._processing_thread: threading.Thread | None = None
         self._processing_queue: queue.Queue[dict] | None = None
         self._processing_completion_callback: Callable[[], None] | None = None
         self._processing_selected_index: int | None = None
+        self._last_saved_state_snapshot: dict | None = None
 
         self._build_variables()
         self._build_layout()
+        self.root.protocol("WM_DELETE_WINDOW", self.on_close_window)
         self.root.after(150, self._draw_placeholder)
 
     def run(self) -> None:
@@ -114,6 +117,7 @@ class CutImageApp:
         self.project_name_var = tk.StringVar(value="")
         self.final_image_name_var = tk.StringVar(value="")
         self.final_image_name_sync_var = tk.BooleanVar(value=True)
+        self.export_cropped_images_var = tk.BooleanVar(value=True)
         self.progress_text_var = tk.StringVar(value="就绪")
         self.progress_value_var = tk.DoubleVar(value=0)
         self.rect_left_var = tk.IntVar(value=0)
@@ -156,6 +160,12 @@ class CutImageApp:
             command=self._on_final_image_name_sync_change,
         )
         self.final_image_name_sync_checkbutton.pack(side=tk.LEFT, padx=(8, 0))
+        self.export_cropped_images_checkbutton = ttk.Checkbutton(
+            toolbar,
+            text="保存裁剪图",
+            variable=self.export_cropped_images_var,
+        )
+        self.export_cropped_images_checkbutton.pack(side=tk.LEFT, padx=(12, 0))
         self._update_export_name_control_state()
 
         progress_row = ttk.Frame(self.root, padding=(10, 0, 10, 6))
@@ -592,6 +602,12 @@ class CutImageApp:
         self.image_canvas.configure(cursor="watch" if is_processing else "")
 
     def new_project(self) -> None:
+        if self._is_processing:
+            messagebox.showinfo("正在处理", "请等待当前批量处理完成后再新建项目。")
+            return
+        if not self._confirm_before_discard_unsaved_changes("新建项目"):
+            return
+
         source_dir = filedialog.askdirectory(title="选择原图文件夹")
         if not source_dir:
             return
@@ -616,9 +632,16 @@ class CutImageApp:
         self._load_settings_to_ui()
         self.refresh_image_list()
         self.select_index(0)
+        self._mark_current_state_as_saved()
         self.log(f"已新建项目，读取 {len(files)} 张图片。")
 
     def open_project(self) -> None:
+        if self._is_processing:
+            messagebox.showinfo("正在处理", "请等待当前批量处理完成后再打开项目。")
+            return
+        if not self._confirm_before_discard_unsaved_changes("打开项目"):
+            return
+
         file_path = filedialog.askopenfilename(
             title="打开项目",
             filetypes=[("CutImage 项目", "*.cutimage.json"), ("JSON 文件", "*.json")],
@@ -645,43 +668,72 @@ class CutImageApp:
         if project.images:
             self.select_index(0)
         self.refresh_final_preview()
+        self._mark_current_state_as_saved()
         self.log(f"已打开项目：{self.project_file.name}")
 
     def save_project_action(self) -> None:
         if not self.ensure_project():
             return
-        self._sync_project_metadata_from_ui()
-        self._sync_settings_from_ui()
-        assert self.project is not None
-        if self.project_file is None:
-            self.save_project_as()
+        if self._is_processing:
+            messagebox.showinfo("正在处理", "请等待当前批量处理完成后再保存项目。")
             return
-
-        try:
-            save_project(self.project, self.project_file)
-        except Exception as exc:
-            messagebox.showerror("保存失败", f"保存项目失败：{exc}")
-            return
-        self.log(f"已保存项目：{self.project_file}")
+        self._save_project_with_outputs(show_success_dialog=True)
 
     def save_project_as(self) -> None:
         if not self.ensure_project():
             return
+        if self._is_processing:
+            messagebox.showinfo("正在处理", "请等待当前批量处理完成后再另存项目。")
+            return
+        self._save_project_as_with_outputs(show_success_dialog=True)
+
+    def _save_project_as_with_outputs(self, show_success_dialog: bool = False) -> bool:
         self._sync_project_metadata_from_ui()
         self._sync_settings_from_ui()
         assert self.project is not None
 
-        file_path = filedialog.asksaveasfilename(
-            title="另存项目",
-            defaultextension=".cutimage.json",
-            initialfile=f"{self.project.project_name or 'project'}.cutimage.json",
-            filetypes=[("CutImage 项目", "*.cutimage.json"), ("JSON 文件", "*.json")],
-        )
-        if not file_path:
-            return
+        selected_parent_dir = filedialog.askdirectory(title="选择项目保存位置")
+        if not selected_parent_dir:
+            return False
+        self.project_file = self._project_file_path_for_parent_dir(Path(selected_parent_dir))
+        return self._save_project_with_outputs(show_success_dialog=show_success_dialog)
 
-        self.project_file = Path(file_path)
-        self.save_project_action()
+    def _save_project_with_outputs(self, show_success_dialog: bool = False) -> bool:
+        if not self.ensure_project():
+            return False
+        self._sync_project_metadata_from_ui()
+        self._sync_settings_from_ui()
+        assert self.project is not None
+        if self.project_file is None:
+            return self._save_project_as_with_outputs(show_success_dialog=show_success_dialog)
+
+        try:
+            save_project(self.project, self.project_file)
+            final_output_path = self._write_output_artifacts(
+                base_dir=self.project_file.parent,
+                include_final_image=True,
+                include_cropped_images=self.project.export_cropped_images,
+            )
+            self.project.output_dir = self.project_file.parent
+            save_project(self.project, self.project_file)
+        except (ImageProcessingError, OSError, ValueError) as exc:
+            messagebox.showerror("保存失败", f"保存项目失败：{exc}")
+            return False
+
+        self._mark_current_state_as_saved()
+        if final_output_path is None:
+            self.log(f"已保存项目：{self.project_file}")
+            messagebox.showwarning("保存完成", f"项目已保存，但当前没有可导出的最终拼接图：\n{self.project_file}")
+            return True
+
+        self.log(f"已保存项目：{self.project_file}")
+        self.log(f"已同步输出最终拼接图：{final_output_path}")
+        if show_success_dialog:
+            messagebox.showinfo(
+                "保存完成",
+                f"项目已保存到：\n{self.project_file}\n\n最终拼接图已保存到：\n{final_output_path}",
+            )
+        return True
 
     def process_all_images(self) -> None:
         self._start_batch_processing()
@@ -704,32 +756,23 @@ class CutImageApp:
         if base_dir is None:
             return
 
-        cropped_dir = base_dir / "cropped"
-        final_dir = base_dir / "final"
-        project_dir = base_dir / "project"
-        extension = "png"
-
-        for item in self.project.images:
-            crop = self.processed_crops.get(item.filename)
-            if crop is None:
-                continue
-            save_rgb_image(self._build_crop_output(crop), cropped_dir / f"{Path(item.filename).stem}.{extension}")
-
         try:
-            final_base_name = self._effective_final_image_name()
-            final_output_path = self._next_available_path(final_dir / f"{final_base_name}.{extension}")
-            final_image = self._build_final_from_cache(size_mode="original")
-            save_rgb_image(final_image, final_output_path)
-        except ImageProcessingError as exc:
-            messagebox.showerror("导出失败", f"无法生成拼接图：{exc}")
+            self.project.output_dir = base_dir
+            final_output_path = self._write_output_artifacts(
+                base_dir=base_dir,
+                include_final_image=True,
+                include_cropped_images=self.project.export_cropped_images,
+            )
+            if self.project_file is not None:
+                save_project(self.project, self.project_file)
+                self._mark_current_state_as_saved()
+        except (ImageProcessingError, OSError, ValueError) as exc:
+            messagebox.showerror("导出失败", f"导出结果失败：{exc}")
             return
 
-        self.project.output_dir = base_dir
-        exported_project_file = project_dir / f"{self.project.project_name}.cutimage.json"
-        save_project(self.project, exported_project_file)
-        if self.project_file is not None:
-            save_project(self.project, self.project_file)
-
+        if final_output_path is None:
+            messagebox.showwarning("导出失败", "当前没有可导出的最终拼接图。")
+            return
         self.log(f"导出完成：{final_output_path}")
         messagebox.showinfo(
             "导出完成",
@@ -1071,6 +1114,114 @@ class CutImageApp:
             return False
         return True
 
+    def on_close_window(self) -> None:
+        if self._is_processing:
+            messagebox.showinfo("正在处理", "请等待当前批量处理完成后再关闭程序。")
+            return
+        if not self._confirm_before_discard_unsaved_changes("关闭程序"):
+            return
+        self.root.destroy()
+
+    def _confirm_before_discard_unsaved_changes(self, action_name: str) -> bool:
+        if self.project is None or not self._has_unsaved_changes():
+            return True
+
+        result = messagebox.askyesnocancel(
+            "未保存修改",
+            f"当前项目有未保存修改，是否先保存后再{action_name}？\n\n是：保存\n否：不保存\n取消：返回继续编辑",
+        )
+        if result is None:
+            return False
+        if result is False:
+            return True
+        return self._save_project_with_outputs()
+
+    def _has_unsaved_changes(self) -> bool:
+        current_snapshot = self._current_state_snapshot()
+        return current_snapshot is not None and current_snapshot != self._last_saved_state_snapshot
+
+    def _mark_current_state_as_saved(self) -> None:
+        self._last_saved_state_snapshot = self._current_state_snapshot()
+
+    def _current_state_snapshot(self) -> dict | None:
+        if self.project is None:
+            return None
+
+        project_name = self.project_name_var.get().strip() or self.project.project_name
+        settings_snapshot = {
+            "threshold": self.threshold_var.get(),
+            "padding": self.padding_var.get(),
+            "spacing": self.spacing_var.get(),
+            "target_height": self.target_height_var.get(),
+            "stretch_target_height": self.stretch_target_height_var.get(),
+            "background_mode": BACKGROUND_LABELS.get(self.background_mode_var.get(), "black"),
+            "output_format": "png",
+            "align_mode": ALIGN_LABELS.get(self.align_mode_var.get(), "center"),
+            "crop_shape_mode": SHAPE_LABELS.get(self.crop_shape_mode_var.get(), "square"),
+            "crop_corner_radius": self.crop_corner_radius_var.get(),
+            "final_shape_mode": SHAPE_LABELS.get(self.final_shape_mode_var.get(), "square"),
+            "final_corner_radius": self.final_corner_radius_var.get(),
+            "add_outline_on_white": self.add_outline_var.get(),
+            "outline_width": self.project.settings.outline_width,
+        }
+        images_snapshot = [
+            {
+                "filename": item.filename,
+                "auto_rect": item.auto_rect.to_dict() if item.auto_rect else None,
+                "manual_rect": item.manual_rect.to_dict() if item.manual_rect else None,
+                "status": item.status,
+                "message": item.message,
+            }
+            for item in self.project.images
+        ]
+        return {
+            "project_name": project_name,
+            "project_file": str(self.project_file.resolve()) if self.project_file is not None else None,
+            "source_dir": str(self.project.source_dir.resolve()),
+            "output_dir": str(self.project.output_dir.resolve()) if self.project.output_dir is not None else None,
+            "final_image_name": self.final_image_name_var.get().strip(),
+            "final_image_name_sync_with_project": self.final_image_name_sync_var.get(),
+            "export_cropped_images": self.export_cropped_images_var.get(),
+            "settings": settings_snapshot,
+            "images": images_snapshot,
+        }
+
+    def _write_output_artifacts(
+        self,
+        base_dir: Path,
+        include_final_image: bool,
+        include_cropped_images: bool,
+    ) -> Path | None:
+        assert self.project is not None
+        extension = "png"
+
+        if include_cropped_images:
+            cropped_dir = base_dir / "cropped"
+            for item in self.project.images:
+                crop = self.processed_crops.get(item.filename)
+                if crop is None:
+                    continue
+                save_rgb_image(self._build_crop_output(crop), cropped_dir / f"{Path(item.filename).stem}.{extension}")
+
+        if not include_final_image or not self.processed_crops:
+            return None
+
+        final_base_name = self._effective_final_image_name()
+        final_output_path = self._next_available_path(base_dir / f"{final_base_name}.{extension}")
+        final_image = self._build_final_from_cache(size_mode="original")
+        save_rgb_image(final_image, final_output_path)
+        return final_output_path
+
+    def _project_file_path_for_parent_dir(self, parent_dir: Path) -> Path:
+        storage_name = self._effective_project_storage_name()
+        return parent_dir / storage_name / f"{storage_name}.cutimage.json"
+
+    def _effective_project_storage_name(self) -> str:
+        if self.project is None:
+            return "project"
+        sanitized_name = self._sanitize_filename_stem(self.project.project_name)
+        return sanitized_name or "project"
+
     def _resolve_export_base_dir(self) -> Path | None:
         assert self.project is not None
         if self.project.output_dir is not None:
@@ -1152,6 +1303,7 @@ class CutImageApp:
         self.project_name_var.set(self.project.project_name)
         self.final_image_name_var.set(self.project.final_image_name)
         self.final_image_name_sync_var.set(self.project.final_image_name_sync_with_project)
+        self.export_cropped_images_var.set(self.project.export_cropped_images)
         self._update_export_name_control_state()
 
     def _sync_project_metadata_from_ui(self) -> None:
@@ -1163,6 +1315,7 @@ class CutImageApp:
             self.project.project_name = project_name
         self.project.final_image_name = self.final_image_name_var.get().strip()
         self.project.final_image_name_sync_with_project = self.final_image_name_sync_var.get()
+        self.project.export_cropped_images = self.export_cropped_images_var.get()
 
     def _sync_settings_from_ui(self) -> None:
         if not self.project:
@@ -1234,6 +1387,8 @@ class CutImageApp:
             self.final_image_name_entry.configure(state=entry_state)
         if self.final_image_name_sync_checkbutton is not None:
             self.final_image_name_sync_checkbutton.configure(state=checkbutton_state)
+        if self.export_cropped_images_checkbutton is not None:
+            self.export_cropped_images_checkbutton.configure(state=checkbutton_state)
 
     def _draw_rect_on_canvas(self, rect: Rect) -> None:
         x1, y1 = self._image_to_canvas_coords(rect.x, rect.y)
