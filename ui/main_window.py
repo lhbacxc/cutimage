@@ -55,6 +55,7 @@ INVALID_FILENAME_CHARS = '<>:"/\\|?*'
 
 class CutImageApp:
     HANDLE_RADIUS = 6
+    EDGE_HIT_WIDTH = 10
 
     def __init__(self) -> None:
         self.root = tk.Tk()
@@ -77,6 +78,8 @@ class CutImageApp:
         self.drag_mode: str | None = None
         self.drag_anchor: tuple[int, int] | None = None
         self.drag_start_rect: Rect | None = None
+        self.selected_edge: str | None = None
+        self._suppress_select_image_reset = False
         self.toolbar_buttons: dict[str, ttk.Button] = {}
         self.project_name_entry: ttk.Entry | None = None
         self.final_image_name_entry: ttk.Entry | None = None
@@ -212,11 +215,13 @@ class CutImageApp:
             bg="#1e1e1e",
             highlightthickness=1,
             highlightbackground="#444444",
+            takefocus=1,
         )
         self.image_canvas.pack(fill=tk.BOTH, expand=True, pady=(6, 8))
         self.image_canvas.bind("<ButtonPress-1>", self.on_canvas_press)
         self.image_canvas.bind("<B1-Motion>", self.on_canvas_drag)
         self.image_canvas.bind("<ButtonRelease-1>", self.on_canvas_release)
+        self.image_canvas.bind("<KeyPress>", self.on_canvas_key_press)
 
         preview_row = ttk.Frame(self.center_frame)
         preview_row.pack(fill=tk.X)
@@ -549,6 +554,7 @@ class CutImageApp:
                 self.log(f"{filename}: {item.message}")
 
         self.processed_crops = processed_crops
+        self.selected_edge = None
         self._refresh_stretch_target_height_from_crops()
         self.refresh_image_list(self._processing_selected_index)
         if self._processing_selected_index is not None:
@@ -602,6 +608,7 @@ class CutImageApp:
             images=[ImageState(filename=file.name) for file in files],
         )
         self.project_file = None
+        self.selected_edge = None
         self.processed_crops.clear()
         self.original_cache.clear()
         self.thumbnail_cache.clear()
@@ -627,6 +634,7 @@ class CutImageApp:
 
         self.project = project
         self.project_file = Path(file_path)
+        self.selected_edge = None
         self.processed_crops.clear()
         self.original_cache.clear()
         self.thumbnail_cache.clear()
@@ -788,14 +796,7 @@ class CutImageApp:
             messagebox.showwarning("参数无效", "右边界必须大于左边界，下边界必须大于上边界。")
             return
 
-        item.manual_rect = Rect(left, top, right - left, bottom - top).clamp(image.shape[1], image.shape[0])
-        item.status = "success"
-        item.message = "手动修正"
-        self.refresh_image_list(self.get_selected_index())
-        self.refresh_current_image()
-        self._update_processed_crop_for_item(item)
-        self._refresh_stretch_target_height_from_crops()
-        self.refresh_final_preview()
+        self._apply_manual_rect_update(item, Rect(left, top, right - left, bottom - top), image)
         self.log(f"{item.filename}: 已应用手动修正。")
 
     def clear_manual_rect(self) -> None:
@@ -806,10 +807,14 @@ class CutImageApp:
         if item is None:
             return
         item.manual_rect = None
+        self.selected_edge = None
         self.process_all_images()
         self.log(f"{item.filename}: 已清除手动修正。")
 
     def on_select_image(self) -> None:
+        if self._suppress_select_image_reset:
+            return
+        self.selected_edge = None
         self.refresh_current_image()
 
     def refresh_current_image(self) -> None:
@@ -847,6 +852,7 @@ class CutImageApp:
             self._set_rect_inputs(rect)
             self._show_crop_preview(image, rect)
         else:
+            self.selected_edge = None
             self._clear_crop_preview()
 
     def refresh_previews(self, *_args) -> None:
@@ -873,8 +879,10 @@ class CutImageApp:
         self.final_preview_label.configure(image=self.final_preview_photo, text="")
 
     def refresh_image_list(self, selected_index: int | None = None) -> None:
+        self._suppress_select_image_reset = True
         self.image_tree.delete(*self.image_tree.get_children())
         if not self.project:
+            self._suppress_select_image_reset = False
             return
 
         for item in self.project.images:
@@ -894,6 +902,7 @@ class CutImageApp:
             self.image_tree.selection_set(item_id)
             self.image_tree.focus(item_id)
             self.image_tree.see(item_id)
+        self._suppress_select_image_reset = False
 
     def select_index(self, index: int | None) -> None:
         self.image_tree.selection_remove(self.image_tree.selection())
@@ -908,6 +917,7 @@ class CutImageApp:
     def on_canvas_press(self, event: tk.Event) -> None:
         if self._is_processing:
             return
+        self.image_canvas.focus_set()
         item = self.get_current_image_state()
         if item is None:
             return
@@ -924,11 +934,21 @@ class CutImageApp:
         if rect:
             mode = self._hit_test_rect(rect, event.x, event.y)
             if mode:
+                if mode in {"left", "top", "right", "bottom"}:
+                    self.selected_edge = mode
+                    self.drag_mode = None
+                    self.drag_anchor = None
+                    self.drag_start_rect = None
+                    self.refresh_current_image()
+                    return
+                self.selected_edge = None
                 self.drag_mode = mode
                 self.drag_anchor = point
                 self.drag_start_rect = Rect(rect.x, rect.y, rect.width, rect.height)
                 return
 
+        self.selected_edge = None
+        self.refresh_current_image()
         self.drag_mode = "create"
         self.drag_anchor = point
         self.drag_start_rect = Rect(point[0], point[1], 1, 1)
@@ -954,24 +974,45 @@ class CutImageApp:
         if point is None:
             return
 
-        item.manual_rect = self._rect_from_drag(self.drag_mode, self.drag_start_rect, self.drag_anchor, point).clamp(
-            image.shape[1],
-            image.shape[0],
+        self._apply_manual_rect_update(
+            item,
+            self._rect_from_drag(self.drag_mode, self.drag_start_rect, self.drag_anchor, point),
+            image,
         )
-        item.status = "success"
-        item.message = "手动修正"
-        self.refresh_current_image()
-        self._update_processed_crop_for_item(item)
-        self._refresh_stretch_target_height_from_crops()
-        self.refresh_final_preview()
 
     def on_canvas_release(self, _event: tk.Event) -> None:
         if self._is_processing:
+            return
+        if self.drag_mode is None:
             return
         self.refresh_image_list(self.get_selected_index())
         self.drag_mode = None
         self.drag_anchor = None
         self.drag_start_rect = None
+        self.image_canvas.focus_set()
+
+    def on_canvas_key_press(self, event: tk.Event) -> str | None:
+        if self._is_processing or self.selected_edge is None:
+            return None
+
+        item = self.get_current_image_state()
+        if item is None:
+            return None
+
+        image = self.get_original_image(item.filename)
+        rect = item.effective_rect
+        if image is None or rect is None:
+            return None
+
+        step = 5 if bool(event.state & 0x0001) else 1
+        new_rect = self._rect_after_edge_nudge(rect, self.selected_edge, event.keysym, step)
+        if new_rect is None:
+            return None
+
+        self._apply_manual_rect_update(item, new_rect, image)
+        self.image_canvas.focus_set()
+        self.refresh_current_image()
+        return "break"
 
     def get_selected_index(self) -> int | None:
         selection = self.image_tree.selection()
@@ -1198,6 +1239,8 @@ class CutImageApp:
         x1, y1 = self._image_to_canvas_coords(rect.x, rect.y)
         x2, y2 = self._image_to_canvas_coords(rect.right, rect.bottom)
         self.image_canvas.create_rectangle(x1, y1, x2, y2, outline="#00d084", width=2)
+        if self.selected_edge is not None:
+            self._draw_selected_edge_highlight(x1, y1, x2, y2, self.selected_edge)
         for handle_x, handle_y in ((x1, y1), (x2, y1), (x1, y2), (x2, y2)):
             self.image_canvas.create_oval(
                 handle_x - self.HANDLE_RADIUS,
@@ -1224,6 +1267,7 @@ class CutImageApp:
         self.current_crop_photo = None
 
     def _draw_placeholder(self) -> None:
+        self.selected_edge = None
         self.image_canvas.delete("all")
         width = max(200, self.image_canvas.winfo_width())
         height = max(200, self.image_canvas.winfo_height())
@@ -1243,6 +1287,25 @@ class CutImageApp:
         self.rect_top_var.set(rect.y)
         self.rect_right_var.set(rect.right)
         self.rect_bottom_var.set(rect.bottom)
+
+    def _update_current_image_list_item(self) -> None:
+        if self.project is None:
+            return
+        index = self.get_selected_index()
+        if index is None or index >= len(self.project.images):
+            return
+
+        item = self.project.images[index]
+        tags = []
+        if item.manual_rect:
+            tags.append("手动")
+        status_label = STATUS_LABELS.get(item.status)
+        if status_label:
+            tags.append(status_label)
+        label = item.filename if not tags else f"{item.filename} [{' / '.join(tags)}]"
+        item_id = str(index)
+        if self.image_tree.exists(item_id):
+            self.image_tree.item(item_id, text=label, image=self._get_list_thumbnail(item.filename))
 
     def _update_processed_crop_for_item(self, item: ImageState) -> None:
         image = self.get_original_image(item.filename)
@@ -1337,6 +1400,17 @@ class CutImageApp:
         for name, (px, py) in points.items():
             if abs(canvas_x - px) <= self.HANDLE_RADIUS * 2 and abs(canvas_y - py) <= self.HANDLE_RADIUS * 2:
                 return name
+        edge_hit = self.EDGE_HIT_WIDTH
+        if y1 + self.HANDLE_RADIUS <= canvas_y <= y2 - self.HANDLE_RADIUS:
+            if abs(canvas_x - x1) <= edge_hit:
+                return "left"
+            if abs(canvas_x - x2) <= edge_hit:
+                return "right"
+        if x1 + self.HANDLE_RADIUS <= canvas_x <= x2 - self.HANDLE_RADIUS:
+            if abs(canvas_y - y1) <= edge_hit:
+                return "top"
+            if abs(canvas_y - y2) <= edge_hit:
+                return "bottom"
         if x1 <= canvas_x <= x2 and y1 <= canvas_y <= y2:
             return "move"
         return None
@@ -1376,4 +1450,64 @@ class CutImageApp:
             right = left + 1
         if bottom <= top:
             bottom = top + 1
+        return Rect(left, top, right - left, bottom - top)
+
+    def _draw_selected_edge_highlight(self, x1: int, y1: int, x2: int, y2: int, edge: str) -> None:
+        if edge == "left":
+            coords = (x1, y1, x1, y2)
+        elif edge == "top":
+            coords = (x1, y1, x2, y1)
+        elif edge == "right":
+            coords = (x2, y1, x2, y2)
+        elif edge == "bottom":
+            coords = (x1, y2, x2, y2)
+        else:
+            return
+        self.image_canvas.create_line(*coords, fill="#ffd166", width=4)
+
+    def _apply_manual_rect_update(self, item: ImageState, rect: Rect, image: np.ndarray) -> None:
+        item.manual_rect = rect.clamp(image.shape[1], image.shape[0])
+        item.status = "success"
+        item.message = "手动修正"
+        self._update_current_image_list_item()
+        self.refresh_current_image()
+        self._update_processed_crop_for_item(item)
+        self._refresh_stretch_target_height_from_crops()
+        self.refresh_final_preview()
+
+    def _rect_after_edge_nudge(self, rect: Rect, edge: str, keysym: str, step: int) -> Rect | None:
+        left = rect.x
+        top = rect.y
+        right = rect.right
+        bottom = rect.bottom
+
+        if edge in {"left", "right"}:
+            if keysym not in {"Left", "Right"}:
+                return None
+            delta = -step if keysym == "Left" else step
+            if edge == "left":
+                left += delta
+            else:
+                right += delta
+        elif edge in {"top", "bottom"}:
+            if keysym not in {"Up", "Down"}:
+                return None
+            delta = -step if keysym == "Up" else step
+            if edge == "top":
+                top += delta
+            else:
+                bottom += delta
+        else:
+            return None
+
+        if right <= left:
+            if edge == "left":
+                left = right - 1
+            else:
+                right = left + 1
+        if bottom <= top:
+            if edge == "top":
+                top = bottom - 1
+            else:
+                bottom = top + 1
         return Rect(left, top, right - left, bottom - top)
