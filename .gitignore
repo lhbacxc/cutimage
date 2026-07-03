@@ -1,0 +1,46 @@
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+
+# 系统临时文件
+Thumbs.db
+.DS_Store
+
+# 本地项目存档
+*.cutimage.json
+
+# 中文路径本地验证目录
+中文测试/
+
+# 本地原始样例图片
+/image/
+/IMG*.jpg
+/IMG*.jpeg
+
+# 通用导出目录
+cropped/
+final/
+
+# 验证与调试目录中的导出产物
+_smoke/*.png
+_style_check/*.png
+_rounded_check/*.png
+_rounded_export_test/导出目录/
+_export_reuse_test/已存在导出/
+_export_reuse_test/project/
+_incremental_export_debug/导出目录/
+_incremental_export_debug/project/
+_incremental_export_test/导出目录/
+_incremental_export_test/project/
+_incremental_export_test2/导出目录/
+_incremental_export_test2/project/
+_incremental_export_test3/导出目录/
+_incremental_export_test3/project/
+_overwrite_test/导出目录/
+_validation_dual_export/final/
+
+# 实验目录中的缓存与输出
+_top_extension_experiment/__pycache__/
+_top_extension_experiment/debug_output/
+_top_extension_experiment/sample_output/

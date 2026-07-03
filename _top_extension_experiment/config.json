@@ -1,0 +1,33 @@
+{
+  "input_dir": "../image",
+  "output_dir": "sample_output",
+  "debug_dir": "debug_output",
+  "limit": 11,
+  "save_debug_images": true,
+  "build_combined_image": true,
+  "processing_settings": {
+    "threshold": 24,
+    "padding": 8,
+    "spacing": 16,
+    "target_height": 280,
+    "background_mode": "black",
+    "output_format": "png",
+    "align_mode": "center",
+    "crop_shape_mode": "square",
+    "crop_corner_radius": 18,
+    "final_shape_mode": "square",
+    "final_corner_radius": 18,
+    "add_outline_on_white": false,
+    "outline_width": 1
+  },
+  "extension": {
+    "enabled": true,
+    "extension_height": 96,
+    "inner_arc_depth": 28,
+    "side_wall_width": 16,
+    "top_border_height": 6,
+    "blend_height": 24,
+    "highlight_strength": 0.85,
+    "highlight_width": 18
+  }
+}
